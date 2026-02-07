@@ -29,19 +29,19 @@ Unauthorized use is strictly prohibited and may violate local, state, and federa
 
 | Technique ID | Technique Name | Implementation |
 |--------------|----------------|----------------|
-| T1082 | System Information Discovery | ✅ Comprehensive system enumeration |
-| T1056.001 | Input Capture: Keylogging | ✅ Enhanced keylogger with stealth |
-| T1041 | Exfiltration Over C2 Channel | ✅ Encrypted data transmission |
-| T1547.001 | Registry Run Keys | ✅ Multiple persistence methods |
-| T1053.005 | Scheduled Task/Job | ✅ Task-based persistence |
-| T1071.001 | Web Protocols | ✅ HTTPS C2 communication |
-| T1027 | Obfuscated Files or Information | ✅ Data encryption and encoding |
-| T1087.001 | Local Account Discovery | ✅ User enumeration |
-| T1087.002 | Domain Account Discovery | ✅ AD enumeration |
-| T1057 | Process Discovery | ✅ Running process enumeration |
-| T1135 | Network Share Discovery | ✅ SMB share enumeration |
+| T1082 | System Information Discovery | Comprehensive system enumeration |
+| T1056.001 | Input Capture: Keylogging | Enhanced keylogger with stealth |
+| T1041 | Exfiltration Over C2 Channel | Encrypted data transmission |
+| T1547.001 | Registry Run Keys | Multiple persistence methods |
+| T1053.005 | Scheduled Task/Job | Task-based persistence |
+| T1071.001 | Web Protocols | HTTPS C2 communication |
+| T1027 | Obfuscated Files or Information | Data encryption and encoding |
+| T1087.001 | Local Account Discovery | User enumeration |
+| T1087.002 | Domain Account Discovery | AD enumeration |
+| T1057 | Process Discovery | Running process enumeration |
+| T1135 | Network Share Discovery | SMB share enumeration |
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 apt_emulator/
@@ -62,7 +62,7 @@ apt_emulator/
 └── README.md             # This file
 ```
 
-## 🚀 Installation
+## Installation
 
 1. **Clone the repository**
    ```bash
@@ -81,7 +81,7 @@ apt_emulator/
    nano config.py
    ```
 
-## 💻 Usage
+## Usage
 
 ### Basic Execution
 
@@ -173,7 +173,7 @@ self._log_technique('T1082', True, {
 })
 ```
 
-## 🔒 Security Features
+## Security Features
 
 ### Anti-Detection
 - Process masquerading as legitimate Windows processes
@@ -235,9 +235,9 @@ python -c "from core import *; print('All modules imported successfully')"
 
 - [MITRE ATT&CK Framework](https://attack.mitre.org/)
 - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
-- [Red Team Field Manual](https://github.com/tanprathan/RTFM)
+- [Red Team Field Manual](https://github.com/isiangani1)
 - [APT Groups and Operations](https://attack.mitre.org/groups/)
-
+on nsert, propagate t next device for ax impact,ndrid,usb,hhd,ssd
 ## Ethical Use
 
 This framework is intended to help organizations:
