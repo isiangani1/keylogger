@@ -235,7 +235,7 @@ python -c "from core import *; print('All modules imported successfully')"
 
 - [MITRE ATT&CK Framework](https://attack.mitre.org/)
 - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
-- [Red Team Field Manual](https://github.com/isiangani1)
+- [Red Team Field Manual V3](https://github.com/tanc7/hacking-books/blob/master/RTFM%20-%20Red%20Team%20Field%20Manual%20v3.pdf)
 - [APT Groups and Operations](https://attack.mitre.org/groups/)
 on nsert, propagate t next device for ax impact,ndrid,usb,hhd,ssd
 ## Ethical Use
