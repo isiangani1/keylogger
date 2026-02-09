@@ -1,0 +1,109 @@
+# -*- mode: python ; coding: utf-8 -*-
+# PyInstaller configuration for APT Payload
+# Generated for cross-platform payload building
+
+block_cipher = None
+
+a = Analysis(
+    ['payload.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'ctypes',
+        'subprocess',
+        'os',
+        'sys',
+        'json',
+        'datetime',
+        'time',
+        'threading',
+        'ssl',
+        'certifi',
+        'charset_normalizer',
+        'idna',
+        'urllib3',
+        'requests',
+        'dns',
+        'dns.resolver',
+        'dns.quic',
+        'psutil',
+        'pynput',
+        'pynput.keyboard',
+        'pynput.mouse',
+        'winregistry',
+        'Xlib',
+        'Xlib.ext',
+        'Xlib.protocol',
+        'evdev',
+        'cobertura',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'tkinter',
+        'test',
+        'pytest',
+        '_pytest',
+        'pygments',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='payload',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,  # Set to True for debugging
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='payload',
+)
+
+# Windows-specific: Create additional executable with console for debugging
+exe_console = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='payload_console',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,  # Enable console for debugging
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)

@@ -1,5 +1,5 @@
 # APT Emulation Framework Dependencies
-
+pyinstaller
 # Core dependencies
 requests>=2.28.0
 psutil>=5.9.0
@@ -9,7 +9,10 @@ pynput>=1.7.6
 pywin32>=304; sys_platform == "win32"
 wmi>=1.5.1; sys_platform == "win32"
 
-# Optional dependencies for advanced features
+# Cryptography and security
+cryptography
+
+# Network and communication
 dnspython>=2.2.0
 urllib3>=1.26.0
 
